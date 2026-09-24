@@ -1,68 +1,3 @@
-import io
-import hashlib
-from pathlib import Path
-
-import pandas as pd
-import streamlit as st
-
-from evaluador import evaluar
-
-
-st.set_page_config(page_title="Evaluador ECA de Aguas", page_icon="💧", layout="wide")
-st.title("💧 Evaluador ECA de Aguas")
-st.caption("Comparación de resultados por muestra y subcategoría con el Excel ECA e información de alcance INACAL / IAS")
-
-BASE = Path(__file__).parent / "ECA_Agua_2017_vs_Alcance_Chalaca_PowerBI.xlsx"
-NECESARIAS = {"Categoría ECA", "Subcategoría", "Descripción subcategoría", "Tipo de parámetro",
-              "Parámetro ECA", "Límite / criterio ECA", "Unidad ECA", "Tipo de criterio", "Línea de fuente"}
-
-
-@st.cache_data
-def cargar_excel(contenido):
-    tabla = pd.read_excel(io.BytesIO(contenido), sheet_name="ECA_PowerBI", dtype={"Subcategoría": str})
-    faltantes = NECESARIAS - set(tabla.columns)
-    if faltantes:
-        raise ValueError("Faltan columnas en ECA_PowerBI: " + ", ".join(sorted(faltantes)))
-    tabla = tabla.dropna(subset=["Subcategoría", "Parámetro ECA"]).fillna("").copy()
-    tabla["ID"] = tabla["Subcategoría"].astype(str) + "_" + tabla["Línea de fuente"].astype(str)
-    if not tabla["ID"].is_unique:
-        raise ValueError("Hay identificadores de parámetros duplicados en el Excel.")
-    tabla["Área"] = tabla["Tipo de parámetro"].map(
-        lambda t: "Microbiología" if t in ("Microbiológico", "Parasitológico")
-        else "Hidrobiología" if t == "Hidrobiológico" else "Fisicoquímica")
-    return tabla
-
-
-with st.sidebar:
-    st.header("Base ECA")
-    archivo = st.file_uploader("Cargar Excel actualizado (opcional)", type=["xlsx"])
-    st.caption("La aplicación usa su Excel incorporado si no cargas uno nuevo.")
-    st.info("El estado de acreditación se muestra como referencia. No modifica el dictamen ECA.")
-
-if archivo is not None:
-    datos = archivo.getvalue()
-elif BASE.exists():
-    datos = BASE.read_bytes()
-else:
-    st.info("Carga el Excel ECA desde el panel lateral para comenzar.")
-    st.stop()
-
-try:
-    eca = cargar_excel(datos)
-except Exception as error:
-    st.error(f"No se pudo leer el Excel: {error}")
-    st.stop()
-
-huella = hashlib.sha256(datos).hexdigest()[:12]
-if st.session_state.get("huella") != huella:
-    st.session_state["huella"] = huella
-    st.session_state["resultados"] = {}
-    st.session_state["ultimo_reporte"] = None
-
-izq, der = st.columns(2)
-with izq:
-    muestra = st.text_input("Identificación de la muestra", "M-001").strip()
-    categoria = st.selectbox("Categoría ECA", eca["Categoría ECA"].drop_duplicates().tolist())
 with der:
     modo = st.radio("Modo de ingreso", ["Un parámetro", "Varios parámetros"], horizontal=True)
     area = st.selectbox("Área", ["Conjunto", "Microbiología", "Fisicoquímica", "Hidrobiología"])
@@ -162,9 +97,7 @@ if enviado:
                 "Subcategoría": codigo, "Área": f["Área"], "Parámetro": f["Parámetro ECA"],
                 "Resultado": r["Resultado"], "Unidad": r["Unidad"],
                 "Límite ECA": f["Límite / criterio ECA"], "Unidad ECA": f["Unidad ECA"],
-                "Evaluación": estado, "Detalle": detalle,
-                "Estado INACAL": f.get("Estado del cruce", ""),
-                "Estado IAS": f.get("Estado IAS", "")})
+                "Evaluación": estado, "Detalle": detalle})
         st.session_state["ultimo_reporte"] = pd.DataFrame(reporte)
         st.session_state["contexto_reporte"] = (muestra, codigo, area, modo)
 
